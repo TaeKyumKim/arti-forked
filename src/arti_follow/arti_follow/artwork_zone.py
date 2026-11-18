@@ -9,7 +9,7 @@
       guide_message (std_msgs/String)                         안내 구역(출구·키오스크) 안내 키
       artwork_zone/state (std_msgs/String)                    지금 판단 (바뀔 때만): idle, dwell art_01 3.2s, explaining art_01 ...
       artwork_zone/explaining (std_msgs/String, latched)      설명 중인 artwork_id (시작할 때), 끝나면 '' → visitor_follower feedback
-      artwork_zone/explained (std_msgs/String)                끝까지 설명한 artwork_id (한 번씩) → visitor_follower feedback ARTWORK_COMPLETED
+      artwork_zone/explained (std_msgs/String)                끝까지 설명한 artwork_id (한 번씩) → visitor_follower result visited_ids
 
 구역은 arti_common/config/artworks.yaml (map 좌표 반원). 코드에 좌표를 두지 않는다.
 

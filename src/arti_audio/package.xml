@@ -3,14 +3,13 @@
 <package format="3">
   <name>arti_audio</name>
   <version>0.0.0</version>
-  <description>Arti guide audio: artwork explanation action server (descriptions from PC3 /arti/description) and guide voice messages (speaker playback)</description>
+  <description>Arti guide audio: artwork explanation action server and guide voice messages (speaker playback)</description>
   <maintainer email="arti@todo.invalid">ROKEY-10-Arti</maintainer>
   <license>Apache-2.0</license>
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>arti_interfaces</exec_depend>
-  <exec_depend>arti_common</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

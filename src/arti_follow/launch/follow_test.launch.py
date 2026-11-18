@@ -3,7 +3,7 @@
     ros2 launch arti_follow follow_test.launch.py
     → <ns>/arti/start_tour 액션을 보내면 undock → 초기 위치 → 출발 방향 보기 → 인식 기다림,
       인식 창에서 따라갈 사람을 마우스로 클릭하면 "인식되었습니다" 안내 후 따라간다
-      ros2 action send_goal /robot1/arti/start_tour arti_interfaces/action/StartTour "{artwork_ids: []}" --feedback
+      ros2 action send_goal /robot1/arti/start_tour arti_interfaces/action/StartTour "{mode: FREE}" --feedback
 
 옵션
     drive:=false             인식·계산·로그만 하고 cmd_vel은 보내지 않음

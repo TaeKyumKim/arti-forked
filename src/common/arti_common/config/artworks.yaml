@@ -16,7 +16,7 @@
 #   키오스크 x -0.84~-1.38, y 0.29~-0.301
 
 # 작품: 관람객이 구역 안에서 멈추면 (artwork_zone 노드의 dwell_time·dwell_radius)
-#       explain_artwork 액션으로 설명 재생. artwork_id 끝 숫자(art_01 → 1)가 PC3 작품 DB 번호(/arti/description).
+#       explain_artwork 액션으로 설명 재생. artwork_id는 arti_audio 작품 정보(artworks_sample.yaml)의 키.
 artworks:
   - {artwork_id: art_01, name: 그림1, x: -2.72, y: 1.23, facing_deg: 0,   radius: 0.7}   # 왼쪽 벽
   - {artwork_id: art_02, name: 그림2, x: -2.72, y: 3.25, facing_deg: 0,   radius: 0.7}   # 왼쪽 벽

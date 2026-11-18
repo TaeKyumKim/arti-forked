@@ -2,13 +2,11 @@
 # 취소하면 0.3초 안에 멈춘다 (합성·재생 중 모두). 안내 음성(guide_message)이 오면 설명은 끊긴다(preempted).
 
 # --- goal ---
-string artwork_id          # 작품 ID (arti_common artworks.yaml의 artwork_id, 예: art_01)
-                           #   guide_audio_node가 끝 숫자(1)로 PC3 /arti/description에 설명을 묻는다
+string artwork_id          # 작품 ID (작품 DB / 지금은 arti_audio의 artworks_sample.yaml 키, 예: art_01)
 ---
 # --- result ---
 bool completed             # 끝까지 재생했으면 true
-string reason              # done / canceled / preempted / no_artwork(PC3에 없는 작품) /
-                           #   no_description(PC3 응답 없음) / tts_error / player_error
+string reason              # done / canceled / preempted / no_artwork / tts_error / player_error
 ---
 # --- feedback ---
 float32 progress           # 0.0 ~ 1.0 (재생 시간 기준 추정값)

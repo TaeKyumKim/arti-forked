@@ -29,8 +29,8 @@
 | 입력 | `tf`, `tf_static` | | odom, base_link, 센서 좌표계 |
 | 입력 | `follow/enable` | Bool | false면 `cmd_vel`을 보내지 않음 (작품 설명 중, 도킹 등) |
 | 입력 | `dock_status` | irobot_create_msgs/DockStatus | 도크에 붙어 있을 때만 undock |
-| 액션 서버 | `arti/start_tour` | arti_interfaces/StartTour | 자유관람 시작 (goal `artwork_ids: []`만. 작품이 들어 있거나 관람 중이면 바로 `success=false`, `message` unsupported_mode·busy). 취소하면 관람 끝. feedback `state`(MOVING·FOLLOW·EXPLAINING·ARTWORK_COMPLETED) + `artwork_id`(art_02 → 2, 없으면 0). result `success`(취소로 끝남), `message`(끝난 이유). 명세 `docs/common/ros2_interfaces.md` |
-| 입력 | `artwork_zone/explaining`, `artwork_zone/explained` | String | `artwork_zone`이 알려 주는 설명 중 작품(latched) → feedback EXPLAINING / 끝까지 설명한 작품 → feedback ARTWORK_COMPLETED 한 번 |
+| 액션 서버 | `arti/start_tour` | arti_interfaces/StartTour | 관람 시작 (goal `mode` FREE만, COURSE·관람 중이면 바로 `success=false`, `message` unsupported_mode·busy). 취소하면 관람 끝. feedback `state`(MOVING·ARRIVED·FOLLOW·EXPLAINING), `registered`(첫 인식 = 등록 완료), `current_artwork_id`, `current_index`/`total`. result `success`(취소로 끝남), `message`(끝난 이유), `visited_ids`(끝까지 설명한 작품, art_02 → 2) |
+| 입력 | `artwork_zone/explaining`, `artwork_zone/explained` | String | `artwork_zone`이 알려 주는 설명 중 작품(latched) / 끝까지 설명한 작품 → feedback·result |
 | 액션 클라이언트 | `undock` | irobot_create_msgs/Undock | Create 3 언독 |
 | 출력 | `initialpose` | PoseWithCovarianceStamped | AMCL 초기 위치 = `arti_common/config/init_pose.yaml`의 undock 지점 |
 | 출력 | `guide_message` | String | 관람객 인식 때 `recognized` → arti_audio가 "인식되었습니다…" |
@@ -44,7 +44,7 @@
 | UNDOCK | 액션 받음 | 도크에 붙어 있으면 undock (도크 밖이면 건너뜀) |
 | LOCALIZE | undock 끝 | `initialpose`를 보내고 map 위치가 출발 지점 0.3 m 안으로 잡힐 때까지 (최대 10 s) |
 | START_FACE | 위치 잡힘 | 제자리 회전으로 키오스크(`artworks.yaml`의 `kiosk` 구역 중심) 쪽을 봄 (`face_zone` 파라미터) |
-| WAIT_VISITOR | 다 돎 | 관람객 인식 기다림 (이전까지 들어온 좌표는 버림). 좌표가 `register_confirm_time`(1 s) 동안 끊김 없이(`register_gap` 0.5 s 안) 들어오면 등록 완료(`on_registered`): "인식되었습니다" 안내 → FOLLOW (키오스크 등록 보고는 `prepare_tour`로 옮길 예정). 확인 중에는 따라가지 않고 바라보기만, 끊기면 다시 기다림 |
+| WAIT_VISITOR | 다 돎 | 관람객 인식 기다림 (이전까지 들어온 좌표는 버림). 좌표가 `register_confirm_time`(1 s) 동안 끊김 없이(`register_gap` 0.5 s 안) 들어오면 등록 완료(`on_registered`): feedback `registered=true`, "인식되었습니다" 안내 → FOLLOW. 확인 중에는 따라가지 않고 바라보기만, 끊기면 다시 기다림 |
 | FOLLOW | 좌표가 들어옴 | 80 cm 유지하며 이동. 0.85 m 안이면 감속해 서고(0.95 m 밖이 되면 다시 출발), 관람객 쪽으로 돎 |
 | SEARCH | 좌표가 3 s 안 옴 | 최종 좌표에 도착할 때까지 이동 → 거기서 10 s 동안 한 바퀴 회전 탐색 |
 | WAIT | 회전 탐색 끝 | 정지 대기 (10 s) — 상태 노드가 "로봇 쪽으로 와 주세요" 안내 |
@@ -53,7 +53,7 @@
 SEARCH·WAIT 중 좌표가 다시 들어오면 FOLLOW. 액션을 취소하면 언제든 정지 → READY.
 
 ```bash
-ros2 action send_goal /robot1/arti/start_tour arti_interfaces/action/StartTour "{artwork_ids: []}" --feedback   # 관람 시작 (Ctrl+C = 취소)
+ros2 action send_goal /robot1/arti/start_tour arti_interfaces/action/StartTour "{mode: FREE}" --feedback   # 관람 시작 (Ctrl+C = 취소)
 ```
 
 ```
@@ -110,18 +110,27 @@ ros2 action send_goal /robot1/arti/start_tour arti_interfaces/action/StartTour "
 | `visitor_localizer` | 웹캠 박스 + Depth → map 좌표, 칼만 필터 | `VisitorDetection`, Depth, camera_info, `/scan`, TF | `visitor/pose`, 마커 | T15, T16, T17 |
 | `amr_controller` | 명령 실행 (UNDOCK·FACE·FOLLOW·GOTO·SEARCH·STOP·DOCK), 안전 워치독 | `AmrCommand`, `visitor/pose`, 범퍼·낭떠러지 | `AmrStatus`, Nav2 목표, `cmd_vel` | T20–T27 |
 | 로봇 상태 노드 (이름 미정) | 상태 전환·판정 (등록 → 추적 → 설명 → 분실 → 종료) | `visitor/pose`(+속도), `AmrStatus`, `battery_state`, `artworks.yaml` | `AmrCommand`, `ArtiEvent`, `explain_artwork` 호출, `guide_message` / `StartSession` 서버 | T30–T34 |
-| `guide_audio_node` | 작품 설명·안내 음성 재생 | `guide_message`, `ExplainArtwork` 액션 서버 | PC3 `/arti/description`(설명 문장) 요청 → 스피커 | T35 |
+| `guide_audio_node` | 작품 설명·안내 음성 재생 | `guide_message` | `ExplainArtwork` 액션 서버 | T35 |
 
-## 다른 PC와 주고받는 것 (팀 명세, `docs/common/ros2_interfaces.md`)
+## 인터페이스 (arti_interfaces에 추가할 것)
 
-| 이름 | 종류 | 방향 | 상대 | 상태 |
+| 이름 | 종류 | 내용 | 작업 |
+|---|---|---|---|
+| `AmrCommand` / `AmrStatus` | msg | 로봇 명령(이동·정지·도킹 등) / 실행 결과·도착 여부·에러 코드 | T20 |
+| `StartSession` | srv | 웹 버튼 → 로봇이 관람 세션 시작, 결과 응답 | T30 |
+| `ArtiEvent` | msg | 등록 성공·분실·배터리 부족·관람 종료(사유) 등 상태 변화 | T30 |
+| `RegisterVisitor` | action | 관람객 등록 (진행률·취소·타임아웃) | T13 |
+| `VisitorDetection` | msg | 찾음 여부·ID·bbox | T12 |
+| `ExplainArtwork` | action | 작품 설명 재생 (진행률·취소·완료) | T35 |
+
+## 다른 팀과 주고받는 것
+
+| 이름 | 종류 | 방향 | 상대 | 내용 |
 |---|---|---|---|---|
-| `/robot1/arti/prepare_tour` | action (`PrepareTour`) | 받음 | PC3 키오스크 | 구현 예정 (호출·undock·만남 장소·관람객 등록. 지금은 `start_tour` 안에 있음) |
-| `/robot1/arti/start_tour` | action (`StartTour`) | 받음 | PC3 키오스크 | `visitor_follower` |
-| `/arti/description` | srv (`Description`) | 부름 | PC3 (작품 DB) | arti_audio `guide_audio_node` |
-| `/robot1/battery_state`, `dock_status`, `odom` | topic | PC3가 구독 | PC3 | 로봇 기본 토픽 |
-
-로봇 PC 안에서만 쓰는 타입: `ExplainArtwork`(artwork_zone → guide_audio_node), `VisitorDetection`.
+| `/arti/start_session` | srv (`StartSession`) | 받음 | 웹(Flask) | 관람 등록 요청 |
+| `/arti/event` | topic (`ArtiEvent`) | 보냄 | 웹(Flask) | 등록 성공·분실·배터리 부족·관람 종료 |
+| 로봇 상태 (이름 미정) | topic | 보냄 | 웹(Flask) | 배터리·현재 상태 주기 발행 |
+| 상대 로봇 위치 (미정) | topic | 받음 | 코스주행 | 경로 겹침 대응 (T28) |
 
 ## 로봇 내부 토픽·액션 (네임스페이스 아래)
 

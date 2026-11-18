@@ -19,10 +19,10 @@
 ## 2. 키오스크가 `start_tour`를 보내면
 
 ```
-goal {artwork_ids: []}
-  ├ 이미 관람 중              → 바로 끝냄: success=false, message=busy (진행 중 관람은 그대로)
-  ├ artwork_ids에 작품이 있음 → 바로 끝냄: success=false, message=unsupported_mode (코스관람 = robot4 몫)
-  └ 빈 배열                   → 자유관람 시작
+goal {mode: FREE}
+  ├ 이미 관람 중      → 바로 끝냄: success=false, message=busy (진행 중 관람은 그대로)
+  ├ mode가 COURSE 등  → 바로 끝냄: success=false, message=unsupported_mode
+  └ FREE 또는 ""      → 관람 시작
 ```
 
 ## 3. 관람 흐름 (상태)
@@ -42,7 +42,7 @@ START_FACE    제자리 회전으로 키오스크 쪽을 봄 (15 s 안에 못 �
 WAIT_VISITOR  관람객 인식 기다림. 이 전까지 들어온 좌표는 버림
   │             좌표가 1 s 동안 끊김 없이(간격 0.5 s 이하) 들어오면 → 등록 완료
   │             확인 중에는 따라가지 않고 바라보기만. 끊기면 처음부터 다시
-  ▼ on_registered(): registered=true(내부), guide_message "recognized" ("인식되었습니다")
+  ▼ on_registered(): registered=true, guide_message "recognized" ("인식되었습니다")
 FOLLOW        관람객과 0.8 m 거리 유지하며 이동
   │ 좌표가 3 s(lost_timeout) 안 옴
   ▼
@@ -54,42 +54,6 @@ LOST          관람 끝 (lost)
 
 SEARCH·WAIT 중 좌표가 다시 오면 → FOLLOW
 액션 취소(cancel)는 언제든 → 정지 → READY (canceled)
-```
-
-### 3-1. step·on_person은 누가 시작시키나
-
-`run_tour`가 부르지 않는다. 노드가 켜질 때 `__init__`에서 등록되어 **처음부터 계속 돈다.**
-`run_tour`는 `self.state`만 바꾸고, 둘은 그 상태를 보고 할 일을 정한다.
-
-```
-__init__ (노드 켤 때 등록)
-  ├ sub('target_person/point_map', on_person)   좌표 올 때마다 → on_person()
-  └ create_timer(0.1, control)                  0.1 s마다     → control() → step()
-        │
-        ▼
-executor.spin()  ← 여기서부터 계속 호출됨 (관람 전에도)
-
-            ┌───────────── self.state (게시판) ─────────────┐
-            │                                                │
- run_tour ──┤ begin_tour()        → UNDOCK                   │  상태를 "쓰는" 쪽
- (매니저)    │ undock 끝           → LOCALIZE                 │
-            └────────────────────────────────────────────────┘
-                     │ 읽음                       │ 읽음
-                     ▼                            ▼
- step() (0.1 s마다)                     on_person() (좌표 올 때마다)
-   READY·UNDOCK → [1] 바로 return          state ∈ {WAIT_VISITOR, FOLLOW, SEARCH, WAIT}?
-   LOCALIZE     → localize()                 아니오 → 좌표 버림
-   START_FACE   → face_start()               예     → kf.x 갱신, seen 시각 기록
-   WAIT_VISITOR → wait_visitor()
-   FOLLOW·SEARCH·WAIT → 추종/탐색/대기
-```
-
-```
-시간 →     노드 켬 ── goal 도착 ── undock 끝 ── 키오스크 봄 ── 등록 ──▶
-state       READY     UNDOCK       LOCALIZE     WAIT_VISITOR    FOLLOW
-step        할 일 없음  할 일 없음    위치 잡기     등록 확인        따라가기
-on_person   버림       버림         버림          저장             저장
-run_tour              begin_tour → undock → ── 0.2 s마다 feedback ──▶
 ```
 
 관람이 끝나면(취소·LOST·실패) 정지하고 `arti/tour_end`를 한 번 보낸다.
@@ -111,23 +75,24 @@ run_tour              begin_tour → undock → ── 0.2 s마다 feedback ─�
 
 ## 5. 키오스크가 받는 것 (`start_tour` feedback, 0.2 s마다)
 
-팀 명세(`docs/common/ros2_interfaces.md`)의 StartTour: feedback = `state` + `artwork_id`, result = `success` + `message`.
-
-| 내부 상태 | feedback `state` | `artwork_id` |
+| 내부 상태 | feedback `state` | `registered` |
 |---|---|---|
-| READY·UNDOCK·LOCALIZE·START_FACE·WAIT_VISITOR | MOVING | 0 |
-| FOLLOW·SEARCH·WAIT·LOST | FOLLOW | 0 |
-| 위 상태에서 작품 설명 중 (`artwork_zone/explaining`) | EXPLAINING | 설명 중인 작품 (art_02 → 2) |
-| 작품을 끝까지 설명함 (`artwork_zone/explained`) | ARTWORK_COMPLETED (작품마다 한 번) | 그 작품 |
+| READY·UNDOCK·LOCALIZE·START_FACE | MOVING | false |
+| WAIT_VISITOR | ARRIVED | false |
+| FOLLOW·SEARCH·WAIT | FOLLOW | true |
+| 위 상태에서 작품 설명 중 | EXPLAINING | true |
 
-- result: `success`(취소로 끝나면 true), `message`(끝난 이유: canceled / lost / undock_failed / no_undock_server / no_localization / busy / unsupported_mode)
-- 관람객 등록 보고는 `prepare_tour`(PrepareTour, feedback REGISTERED)로 옮길 예정. 지금은 등록 전후 구분 없이 WAIT_VISITOR = MOVING.
+- `current_artwork_id`: 설명 중인 작품 (art_02 → 2, 없으면 0)
+- `current_index` / `total`: 끝까지 설명한 작품 수 / artworks.yaml 작품 수
+- result: `success`(취소로 끝나면 true), `message`(끝난 이유), `visited_ids`(끝까지 설명한 작품, 순서대로)
+
+**등록 성공 보고 = `registered`가 처음 true가 되는 feedback.**
 
 ## 6. 주고받는 토픽·액션 (`/robot1` 아래)
 
 | 방향 | 이름 | 타입 | 상대 |
 |---|---|---|---|
-| 액션 서버 | `arti/start_tour` | arti_interfaces/StartTour | PC3 키오스크·관제 |
+| 액션 서버 | `arti/start_tour` | arti_interfaces/StartTour | 키오스크·관제 |
 | 입력 | `target_person/point_map` | PointStamped (map) | person_tracker |
 | 입력 | `scan` | LaserScan | 로봇 LiDAR |
 | 입력 | `oakd/stereo/image_raw/compressedDepth`, `oakd/stereo/camera_info` | | 로봇 OAK-D |
@@ -151,7 +116,7 @@ ros2 launch arti_follow tour.launch.py
 
 관람 시작 (**로봇이 undock하고 회전하니 주변이 안전할 때**). Ctrl+C = 취소
 ```bash
-ros2 action send_goal --feedback /robot1/arti/start_tour arti_interfaces/action/StartTour "{artwork_ids: []}"
+ros2 action send_goal --feedback /robot1/arti/start_tour arti_interfaces/action/StartTour "{mode: FREE}"
 ```
 
 상태 보기

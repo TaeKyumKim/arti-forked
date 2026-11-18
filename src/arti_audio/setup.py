@@ -24,7 +24,6 @@ setup(
     entry_points={
         'console_scripts': [
             'guide_audio_node = arti_audio.guide_audio_node:main',
-            'fake_description_server = arti_audio.fake_description_server:main',   # 시험용 가짜 PC3
         ],
     },
 )

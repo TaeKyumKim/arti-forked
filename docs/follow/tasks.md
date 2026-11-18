@@ -105,7 +105,7 @@
 
 ## ⑤ 작품 설명 (~11/16–17)
 
-- [ ] **T35** `guide_audio_node` · WEB/AUD · **정욱** ~11/16 — `ExplainArtwork` action, 작품 번호로 PC3 `/arti/description`에서 설명을 받아 음성 재생 (PC3 응답 없으면 실패 `no_description`, 11/18), 취소 시 0.3초 안에 정지, `guide_message` 구독(시작·배터리 종료·관람 종료·'로봇 쪽으로'), 안내가 설명보다 우선, 출력 장치 끊김 알림
+- [ ] **T35** `guide_audio_node` · WEB/AUD · **정욱** ~11/16 — `ExplainArtwork` action, `artworks.yaml` ID로 음성 재생, 취소 시 0.3초 안에 정지, `guide_message` 구독(시작·배터리 종료·관람 종료·'로봇 쪽으로'), 안내가 설명보다 우선, 출력 장치 끊김 알림
   - [ ] **T35-1** 설명 액션 서버 · **정욱** ~11/16
   - [ ] **T35-2** 안내 음성 재생·우선순위·이어폰 확인 · **정욱** ~11/16
 - [ ] **T32** 정지·구역 판정·설명 · MM-2 · **충만** ~11/16 — 5초간 반경 60 cm 안이면 정지(`is_dwelling`), 반원 구역 판정·겹치면 가장 가까운 작품(`find_artwork_zone`), 구역 밖이면 대기, 중복 설명 안 함, 추종 취소 → FACE → `explain_artwork`, 1 m 이탈·인식 끊김 시 취소 후 재추적

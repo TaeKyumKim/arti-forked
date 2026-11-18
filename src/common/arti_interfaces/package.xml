@@ -3,7 +3,7 @@
 <package format="3">
   <name>arti_interfaces</name>
   <version>0.0.0</version>
-  <description>Arti custom msg/srv/action (PC 간 명세: docs/common/ros2_interfaces.md)</description>
+  <description>Arti custom msg/srv/action</description>
   <maintainer email="arti@todo.invalid">ROKEY-10-Arti</maintainer>
   <license>Apache-2.0</license>
 

@@ -14,8 +14,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/VisitorDetection.msg"
   "action/ExplainArtwork.action"
   "action/StartTour.action"
-  "action/PrepareTour.action"
-  "srv/Description.srv"
   DEPENDENCIES std_msgs
 )
 

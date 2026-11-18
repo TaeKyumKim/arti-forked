@@ -1,8 +1,0 @@
-# 작품 설명 조회 (PC1/PC2 Client -> PC3 Server, /arti/description)
-
-# Request
-int32 artwork_id      # 조회할 작품 번호
----
-# Response
-bool success          # 조회 성공 여부
-string description    # SQLite에 저장된 작품 설명

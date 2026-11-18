@@ -2,26 +2,20 @@
 작품 설명·안내 음성 재생 노드 (T35).
 
 받는 것
-  explain_artwork (arti_interfaces/action/ExplainArtwork) : 작품 설명 재생 (artwork_zone → 여기)
+  explain_artwork (arti_interfaces/action/ExplainArtwork) : 작품 설명 재생
   guide_message   (std_msgs/String)                       : 안내 키 (guide_lines.yaml의 guides)
-부르는 것
-  /arti/description (arti_interfaces/srv/Description, 서비스 클라이언트 → PC3) : 작품 번호 → 설명 문장
-    네임스페이스 없는 전역 이름 (PC3 서버 하나를 두 로봇이 같이 씀). 명세: docs/common/ros2_interfaces.md
 
 흐름
-  artwork_id "art_02" → 번호 2 → /arti/description 요청 → PC3가 DB에서 description 응답  (content.py)
-             → edge-tts로 mp3 합성(캐시)                                                (tts.py)
-             → 재생 명령(pw-play) → 스피커                                               (player.py)
-  PC3가 없거나 description_timeout_sec 안에 응답이 없으면 → 설명하지 않고 실패 (reason no_description)
-  PC3가 success=false(없는 작품)·빈 설명을 주면 → 실패 (reason no_artwork)
+  artwork_id → 작품 정보 출처(지금 샘플 YAML, 나중에 DB)에서 description   (content.py)
+             → edge-tts로 mp3 합성(캐시)                                    (tts.py)
+             → 재생 명령(pw-play) → 스피커                                   (player.py)
 
 규칙
   - 안내 음성이 오면 진행 중인 설명은 끊는다 (result.reason = preempted).
   - 안내 음성이 나오는 동안 새 설명 goal은 안내가 끝나거나 멈출 때까지 기다렸다가 재생한다.
   - 새 설명 goal이 오면 이전 설명은 끊는다 (preempted). 한 번에 설명 하나만.
   - 취소하면 0.3초 안에 멈춘다 (합성·재생 중 모두 50 ms마다 확인).
-  - 시작할 때 안내 문구와 (PC3가 응답하면) 작품 설명을 미리 합성해 둔다 → 첫 재생 지연을 줄인다.
-    작품 목록은 arti_common artworks.yaml. 설명 문장은 매번 PC3에 묻는다 (DB가 바뀌면 새로 합성).
+  - 시작할 때 안내 문구와 (가능하면) 작품 설명을 미리 합성해 둔다 → 첫 재생 지연을 줄인다.
 """
 
 import os
@@ -31,7 +25,6 @@ import time
 
 from ament_index_python.packages import get_package_share_directory
 from arti_interfaces.action import ExplainArtwork
-from arti_interfaces.srv import Description
 import rclpy
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -39,7 +32,7 @@ from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import String
 
-from arti_audio.content import artwork_ids, artwork_number, GuideLines
+from arti_audio.content import artwork_text, GuideLines, YamlArtworkSource
 from arti_audio.player import Player
 from arti_audio.tts import TtsCache
 
@@ -55,9 +48,7 @@ class GuideAudioNode(Node):
         config = os.path.join(get_package_share_directory('arti_audio'), 'config')
         # 파라미터 (바꿀 때는 -p 이름:=값). 파일 경로를 비우면 설치된 share/arti_audio/config/의 파일
         self.declare_parameter('guide_lines_file', '')      # TTS 목소리·빠르기, 안내 문구 (guide_lines.yaml)
-        self.declare_parameter('artworks_file', '')         # 미리 합성할 작품 목록 (비우면 arti_common artworks.yaml)
-        self.declare_parameter('description_service', '/arti/description')   # PC3 작품 설명 서비스 (전역 이름)
-        self.declare_parameter('description_timeout_sec', 3.0)   # PC3 응답 제한 [s] — 넘으면 실패
+        self.declare_parameter('artworks_file', '')         # 작품 정보 (artworks_sample.yaml, 나중에 DB)
         self.declare_parameter('tts_cache_dir', '~/.cache/arti_audio/tts')   # 합성한 mp3 (저장소 밖)
         self.declare_parameter('tts_timeout_sec', 10)       # 합성 서버 접속 제한 [s] (받기는 3배)
         self.declare_parameter('prefetch', True)            # 시작할 때 안내·작품 설명을 미리 합성
@@ -68,9 +59,8 @@ class GuideAudioNode(Node):
         p = self.get_parameter
         self.lines = GuideLines(p('guide_lines_file').value
                                 or os.path.join(config, 'guide_lines.yaml'))
-        self.artworks_file = p('artworks_file').value or os.path.join(
-            get_package_share_directory('arti_common'), 'config', 'artworks.yaml')
-        self.desc_timeout = float(p('description_timeout_sec').value)
+        self.source = YamlArtworkSource(
+            p('artworks_file').value or os.path.join(config, 'artworks_sample.yaml'))
         self.tts = TtsCache(p('tts_cache_dir').value, self.lines.voice, self.lines.rate,
                             int(p('tts_timeout_sec').value))
         self.player_cmd = shlex.split(p('player_cmd').value)
@@ -80,9 +70,6 @@ class GuideAudioNode(Node):
         self._explain_stop = None   # 지금 설명 중인 goal을 끊는 Event
 
         cb = ReentrantCallbackGroup()
-        # 응답은 executor의 다른 스레드가 받는다 → 액션 실행 스레드는 future만 기다림 (같은 그룹이라도 Reentrant라 OK)
-        self.desc_client = self.create_client(Description, p('description_service').value,
-                                              callback_group=cb)
         self.create_subscription(String, 'guide_message', self._on_guide, 10,
                                  callback_group=cb)
         self._server = ActionServer(
@@ -94,7 +81,7 @@ class GuideAudioNode(Node):
             callback_group=cb)
 
         self.get_logger().info(
-            f'준비됨: 목소리 {self.lines.voice}, 작품 설명 {self.desc_client.srv_name}, '
+            f'준비됨: 목소리 {self.lines.voice}, '
             f'재생 명령 "{" ".join(self.player_cmd)}", 캐시 {self.tts.cache_dir}')
         if p('prefetch').value:
             threading.Thread(target=self._prefetch, daemon=True).start()
@@ -104,19 +91,10 @@ class GuideAudioNode(Node):
     def _prefetch(self):
         texts = [('guide', k, t) for k, t in self.lines.guides.items()]
         try:
-            ids = artwork_ids(self.artworks_file)
-        except Exception as e:  # 작품 목록이 이상해도 노드는 계속
-            self.get_logger().warn(f'작품 목록 읽기 실패 (작품 설명 미리 합성 건너뜀): {e}')
-            ids = []
-        if ids and not self.desc_client.wait_for_service(timeout_sec=self.desc_timeout):
-            self.get_logger().warn(f'{self.desc_client.srv_name} 없음 (PC3 확인) → 작품 설명 미리 합성 건너뜀')
-            ids = []
-        for aid in ids:
-            text, why = self._ask_description(aid)
-            if text:
-                texts.append(('artwork', aid, text))
-            else:
-                self.get_logger().warn(f'작품 설명 못 받음 ({aid}: {why}) → 미리 합성 건너뜀')
+            for aid, artwork in self.source.all_artworks().items():
+                texts.append(('artwork', aid, artwork_text(artwork)))
+        except Exception as e:  # 작품 정보가 이상해도 노드는 계속
+            self.get_logger().warn(f'작품 정보 읽기 실패 (미리 합성 건너뜀): {e}')
         made, failed = 0, []
         for kind, key, text in texts:
             if self.tts.cached(text):
@@ -189,44 +167,6 @@ class GuideAudioNode(Node):
             time.sleep(POLL_SEC)
         return None
 
-    def _ask_description(self, artwork_id, goal_handle=None, stop=None):
-        """PC3에 작품 설명을 묻는다. 돌려줌: (description, '') 또는 (None, 실패 이유).
-        실패 이유: no_artwork (번호 없음·success=false·빈 설명) / no_description (서버 없음·시간 초과)
-                   / canceled·preempted (goal_handle이 있을 때, 기다리는 중 취소·끊김)"""
-        num = artwork_number(artwork_id)
-        if num is None:
-            return None, 'no_artwork'
-        deadline = time.monotonic() + self.desc_timeout
-
-        def waiting(done):
-            return lambda: not done() and time.monotonic() < deadline
-
-        def wait(done):
-            if goal_handle is None:
-                while waiting(done)():
-                    time.sleep(POLL_SEC)
-                return None
-            return self._wait(goal_handle, stop, waiting(done))
-
-        hit = wait(self.desc_client.service_is_ready)
-        if hit:
-            return None, hit[1]
-        if not self.desc_client.service_is_ready():
-            return None, 'no_description'
-        future = self.desc_client.call_async(Description.Request(artwork_id=num))
-        hit = wait(future.done)
-        if hit:
-            future.cancel()
-            return None, hit[1]
-        if not future.done():
-            future.cancel()
-            return None, 'no_description'
-        res = future.result()
-        text = (res.description or '').strip() if res is not None else ''
-        if res is None or not res.success or not text:
-            return None, 'no_artwork'
-        return text, ''
-
     def _execute(self, goal_handle):
         stop = threading.Event()
         with self._lock:
@@ -239,17 +179,16 @@ class GuideAudioNode(Node):
                     self._explain_stop = None
 
     def _play_explain(self, goal_handle, artwork_id, stop):
-        # 1) PC3에 작품 설명 요청 (기다리는 중에도 50 ms마다 취소·끊김 확인)
-        text, why = self._ask_description(artwork_id, goal_handle, stop)
-        if why in ('canceled', 'preempted'):
-            return self._finish(goal_handle, 'canceled' if why == 'canceled' else 'abort', False, why)
+        # 1) 작품 정보 → 읽을 문장
+        try:
+            artwork = self.source.get(artwork_id)
+            text = artwork_text(artwork) if artwork else None
+        except Exception as e:
+            self.get_logger().error(f'작품 정보 읽기 실패 ({artwork_id}): {e}')
+            text = None
         if not text:
-            if why == 'no_description':
-                self.get_logger().error(f'작품 설명 응답 없음: {self.desc_client.srv_name} '
-                                        f'({self.desc_timeout:.0f} s, PC3 확인) → 설명 안 함')
-            else:
-                self.get_logger().warn(f'작품 설명 없음: artwork_id="{artwork_id}" (PC3 success=false·빈 설명)')
-            return self._finish(goal_handle, 'abort', False, why)
+            self.get_logger().warn(f'작품 정보 없음: artwork_id="{artwork_id}"')
+            return self._finish(goal_handle, 'abort', False, 'no_artwork')
 
         # 2) 음성 합성 (캐시에 없을 때만)
         #    합성은 몇 초 걸려서 별도 스레드에서 하고, 여기서는 50 ms마다 취소를 확인한다.

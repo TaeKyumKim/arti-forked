@@ -1,15 +1,25 @@
-# 관람 시작 및 진행 (PC3 Client -> PC1/PC2 Server)
-# 자유관람(Robot1): artwork_ids = []
-# 코스관람(Robot4): artwork_ids = [1, 3, 4] 등
-# 관람 종료는 Result, 취소는 Action Cancel로 처리
+# 관람 시작 (키오스크·관제 → 로봇, <ns>/arti/start_tour)
+# FREE  (자유 관람, robot1 visitor_follower): undock → 초기 위치 → 키오스크 쪽 보기 → 관람객 인식 기다림
+#        → 인식되면 registered=true, "인식되었습니다" 안내 → 추종. 작품 앞에서 멈추면 artwork_zone이 설명.
+#        관람 중에는 끝나지 않는다. 끝내려면 취소(cancel). 관람객을 끝내 못 찾으면(LOST) 스스로 끝난다.
+# COURSE (코스 관람, 코스주행 로봇): artwork_ids 순서대로 이동·설명. robot1은 받지 않는다(success=false).
+# 작품 ID(int)는 arti_common artworks.yaml artwork_id의 끝 숫자 (art_01 → 1).
 
-# Goal
-int32[] artwork_ids   # 선택한 작품 ID 목록
+# --- goal ---
+string mode            # "FREE" / "COURSE" ("" = FREE)
+int32[] artwork_ids    # FREE면 빈 배열, COURSE면 방문 순서대로
 ---
-# Result
-bool success          # 관람 최종 성공 여부
-string message        # 종료·실패 사유
+# --- result ---
+bool success           # FREE: 취소로 정상 종료하면 true, 분실·실패면 false
+string message         # 끝난 이유·거절 사유: canceled / lost / undock_failed / no_undock_server /
+                       #   no_localization / busy / unsupported_mode
+int32[] visited_ids    # 관람 완료한(끝까지 설명한) 작품 ID, 설명한 순서
 ---
-# Feedback
-string state          # MOVING | FOLLOW | EXPLAINING | ARTWORK_COMPLETED | RETURNING
-int32 artwork_id      # 관련 작품 없으면 0
+# --- feedback ---
+string state           # FOLLOW / MOVING / ARRIVED / EXPLAINING / RETURNING
+                       #   FREE: MOVING = undock·출발 위치 잡기·키오스크 쪽 보기, ARRIVED = 관람객 인식 기다림,
+                       #         FOLLOW = 추종(찾는 중 포함), EXPLAINING = 작품 설명 중. 자세한 상태는 follow/state
+bool registered        # 관람객 등록 완료 여부 (자유 주행). 처음 인식되면 true, 관람 끝까지 유지
+int32 current_artwork_id   # 설명 중인 작품 ID (없으면 0)
+int32 current_index    # 현재 방문 순번 (FREE: 지금까지 설명을 끝낸 작품 수)
+int32 total            # 전체 작품 수 (FREE: artworks.yaml의 작품 수)
